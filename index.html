@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>European Power Grid Frequency</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0a0e1a;
+      color: #e0e6f0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    h1 {
+      font-size: 1.1rem;
+      font-weight: 400;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: #7a8aaa;
+      margin-bottom: 2rem;
+    }
+
+    .card {
+      background: #111828;
+      border: 1px solid #1e2d45;
+      border-radius: 24px;
+      padding: 2.5rem 3rem 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      box-shadow: 0 0 60px rgba(0,120,255,0.07);
+    }
+
+    /* ── Gauge ─────────────────────────────── */
+    .gauge-wrap {
+      position: relative;
+      width: 340px;
+      height: 180px; /* half-circle viewport */
+      overflow: visible;
+    }
+
+    canvas#gauge {
+      display: block;
+    }
+
+    /* ── Digital readout ────────────────────── */
+    .readout {
+      margin-top: 1.4rem;
+      text-align: center;
+    }
+
+    .freq-value {
+      font-size: 3.4rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+      transition: color 0.3s;
+    }
+
+    .freq-unit {
+      font-size: 1.1rem;
+      color: #556070;
+      margin-left: 4px;
+    }
+
+    .freq-delta {
+      margin-top: 0.5rem;
+      font-size: 0.85rem;
+      letter-spacing: 0.05em;
+      color: #556070;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ── Status bar ─────────────────────────── */
+    .status-row {
+      margin-top: 1.6rem;
+      display: flex;
+      gap: 1.2rem;
+      font-size: 0.78rem;
+      color: #556070;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #22c55e;
+      margin-right: 5px;
+      animation: pulse 1.6s ease-in-out infinite;
+      vertical-align: middle;
+    }
+
+    .status-dot.error { background: #ef4444; animation: none; }
+
+    @keyframes pulse {
+      0%,100% { opacity: 1; }
+      50%      { opacity: 0.3; }
+    }
+
+    /* range labels */
+    .range-labels {
+      display: flex;
+      justify-content: space-between;
+      width: 340px;
+      margin-top: -0.3rem;
+      padding: 0 6px;
+      font-size: 0.7rem;
+      color: #3a4a60;
+      letter-spacing: 0.04em;
+    }
+  </style>
+</head>
+<body>
+
+<h1>European Power Grid Frequency</h1>
+
+<div class="card">
+  <div class="gauge-wrap">
+    <canvas id="gauge" width="340" height="200"></canvas>
+  </div>
+
+  <div class="range-labels">
+    <span>49.80</span>
+    <span>50.00</span>
+    <span>50.20</span>
+  </div>
+
+  <div class="readout">
+    <span class="freq-value" id="freqVal">–&thinsp;.–––</span><span class="freq-unit">Hz</span>
+    <div class="freq-delta" id="freqDelta">&nbsp;</div>
+  </div>
+
+  <div class="status-row">
+    <span><span class="status-dot" id="dot"></span><span id="statusTxt">connecting…</span></span>
+    <span id="timestampTxt"></span>
+  </div>
+</div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────
+const API_URL   = 'https://dat.netzfrequenzmessung.de:9080/frequenz.XML';
+const POLL_MS   = 1000;
+const MIN_HZ    = 49.80;
+const MAX_HZ    = 50.20;
+const NOM_HZ    = 50.00;
+
+// Gauge arc: from 210° (left = MIN) through 90° (top = NOM) to 330° (right = MAX)
+// We map [49.80 … 50.20] → [210° … 330°] going counter-clockwise via top
+// In canvas angles: 0° = right, measured clockwise.
+// Our arc: start = 150° (canvas) going clockwise to 390° (canvas) = 210° sweep
+const ARC_START_DEG = 150;   // canvas degrees, = "lower-left"
+const ARC_SWEEP_DEG = 240;   // total sweep in canvas-clockwise direction
+const R_OUTER = 150;
+const R_INNER = 110;
+const CX = 170, CY = 175;    // centre of arc circle (below canvas top)
+
+// ── Canvas setup ─────────────────────────────────────────────────────────
+const canvas = document.getElementById('gauge');
+const ctx    = canvas.getContext('2d');
+
+// Retina
+const DPR = window.devicePixelRatio || 1;
+canvas.width  = 340 * DPR;
+canvas.height = 200 * DPR;
+canvas.style.width  = '340px';
+canvas.style.height = '200px';
+ctx.scale(DPR, DPR);
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function deg2rad(d) { return d * Math.PI / 180; }
+
+function hzToAngle(hz) {
+  const t = Math.max(0, Math.min(1, (hz - MIN_HZ) / (MAX_HZ - MIN_HZ)));
+  return ARC_START_DEG + t * ARC_SWEEP_DEG;
+}
+
+// colour ramp: red → yellow → green → yellow → red
+function hzToColor(hz) {
+  const d = Math.abs(hz - NOM_HZ);
+  if (d < 0.02)       return '#22c55e'; // green
+  if (d < 0.05)       return '#84cc16'; // lime
+  if (d < 0.10)       return '#eab308'; // yellow
+  if (d < 0.15)       return '#f97316'; // orange
+  return               '#ef4444';       // red
+}
+
+// ── Draw gauge ────────────────────────────────────────────────────────────
+let animHz   = NOM_HZ;   // smoothly animated value
+let targetHz = NOM_HZ;
+let prevHz   = null;
+
+function drawGauge(hz) {
+  ctx.clearRect(0, 0, 340, 200);
+
+  const startRad = deg2rad(ARC_START_DEG);
+  const endRad   = deg2rad(ARC_START_DEG + ARC_SWEEP_DEG);
+
+  // ── track (background arc) ──
+  ctx.beginPath();
+  ctx.arc(CX, CY, (R_OUTER + R_INNER) / 2, startRad, endRad, false);
+  ctx.lineWidth  = R_OUTER - R_INNER;
+  ctx.strokeStyle = '#1a2535';
+  ctx.stroke();
+
+  // ── coloured filled arc up to current value ──
+  const valRad   = deg2rad(hzToAngle(hz));
+  const nomRad   = deg2rad(hzToAngle(NOM_HZ));
+  const color    = hzToColor(hz);
+
+  // gradient from nominal outward
+  const grd = ctx.createConicGradient
+    ? null  // fallback below
+    : null;
+
+  ctx.beginPath();
+  ctx.arc(CX, CY, (R_OUTER + R_INNER) / 2, startRad, valRad, false);
+  ctx.lineWidth   = R_OUTER - R_INNER;
+  ctx.strokeStyle = color;
+  ctx.lineCap     = 'butt';
+  ctx.stroke();
+
+  // ── tick marks ──
+  const ticks = [
+    { hz: 49.80, major: true  },
+    { hz: 49.85, major: false },
+    { hz: 49.90, major: true  },
+    { hz: 49.95, major: false },
+    { hz: 50.00, major: true  },
+    { hz: 50.05, major: false },
+    { hz: 50.10, major: true  },
+    { hz: 50.15, major: false },
+    { hz: 50.20, major: true  },
+  ];
+
+  ticks.forEach(({ hz: thz, major }) => {
+    const a    = deg2rad(hzToAngle(thz));
+    const ro   = major ? R_OUTER + 4 : R_OUTER + 2;
+    const ri   = major ? R_OUTER - 8 : R_OUTER - 5;
+    ctx.beginPath();
+    ctx.moveTo(CX + ro * Math.cos(a), CY + ro * Math.sin(a));
+    ctx.lineTo(CX + ri * Math.cos(a), CY + ri * Math.sin(a));
+    ctx.lineWidth   = major ? 2 : 1;
+    ctx.strokeStyle = major ? '#3a5070' : '#283545';
+    ctx.stroke();
+  });
+
+  // ── nominal line (50.00) ──
+  {
+    const a  = deg2rad(hzToAngle(NOM_HZ));
+    const ro = R_OUTER + 6;
+    const ri = R_INNER - 6;
+    ctx.beginPath();
+    ctx.moveTo(CX + ro * Math.cos(a), CY + ro * Math.sin(a));
+    ctx.lineTo(CX + ri * Math.cos(a), CY + ri * Math.sin(a));
+    ctx.lineWidth   = 2;
+    ctx.strokeStyle = '#3b82f6';
+    ctx.stroke();
+  }
+
+  // ── needle ──
+  const needleAngle = deg2rad(hzToAngle(hz));
+  const nLen = R_INNER - 12;
+  const nW   = 3;
+  ctx.save();
+  ctx.translate(CX, CY);
+  ctx.rotate(needleAngle);
+  ctx.beginPath();
+  ctx.moveTo(-nW, 0);
+  ctx.lineTo(nLen, 0);
+  ctx.lineWidth   = nW;
+  ctx.strokeStyle = color;
+  ctx.lineCap     = 'round';
+  ctx.stroke();
+  // needle hub
+  ctx.beginPath();
+  ctx.arc(0, 0, 7, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.restore();
+
+  // ── glow on needle tip ──
+  ctx.save();
+  ctx.translate(CX + nLen * Math.cos(needleAngle), CY + nLen * Math.sin(needleAngle));
+  const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, 14);
+  glow.addColorStop(0,   color + 'cc');
+  glow.addColorStop(1,   color + '00');
+  ctx.beginPath();
+  ctx.arc(0, 0, 14, 0, Math.PI * 2);
+  ctx.fillStyle = glow;
+  ctx.fill();
+  ctx.restore();
+}
+
+// ── Animation loop ────────────────────────────────────────────────────────
+function animate() {
+  animHz += (targetHz - animHz) * 0.18;
+  drawGauge(animHz);
+  requestAnimationFrame(animate);
+}
+animate();
+
+// ── DOM updates ───────────────────────────────────────────────────────────
+const freqValEl  = document.getElementById('freqVal');
+const freqDelta  = document.getElementById('freqDelta');
+const dotEl      = document.getElementById('dot');
+const statusEl   = document.getElementById('statusTxt');
+const tsEl       = document.getElementById('timestampTxt');
+
+function updateUI(hz, timestamp) {
+  const color = hzToColor(hz);
+  freqValEl.textContent  = hz.toFixed(3);
+  freqValEl.style.color  = color;
+
+  const delta = hz - NOM_HZ;
+  const sign  = delta >= 0 ? '+' : '';
+  freqDelta.textContent  = `${sign}${delta.toFixed(3)} Hz from nominal`;
+  freqDelta.style.color  = color;
+
+  dotEl.classList.remove('error');
+  statusEl.textContent = 'live';
+  if (timestamp) tsEl.textContent = timestamp;
+}
+
+function setError(msg) {
+  dotEl.classList.add('error');
+  statusEl.textContent = msg;
+}
+
+// ── Fetch & parse XML ─────────────────────────────────────────────────────
+async function fetchFrequency() {
+  try {
+    const res = await fetch(API_URL, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const parser = new DOMParser();
+    const xml    = parser.parseFromString(text, 'application/xml');
+
+    // Try common element names
+    let val = null;
+    for (const tag of ['frequenz', 'Frequenz', 'frequency', 'value', 'Value', 'f']) {
+      const el = xml.getElementsByTagName(tag)[0];
+      if (el) { val = parseFloat(el.textContent.replace(',', '.')); break; }
+    }
+    // fallback: first text node that looks like a frequency
+    if (val === null || isNaN(val)) {
+      const m = text.match(/\b(4[89]\.\d+|50\.\d+|51\.\d+)\b/);
+      if (m) val = parseFloat(m[1]);
+    }
+
+    if (val === null || isNaN(val)) throw new Error('parse error');
+
+    targetHz = val;
+    prevHz   = val;
+    const now = new Date().toLocaleTimeString();
+    updateUI(val, now);
+  } catch (e) {
+    setError('error – retrying');
+    console.error(e);
+  }
+}
+
+// ── Poll every second ─────────────────────────────────────────────────────
+fetchFrequency();
+setInterval(fetchFrequency, POLL_MS);
+</script>
+</body>
+</html>
