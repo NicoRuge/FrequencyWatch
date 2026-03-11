@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>European Power Grid Frequency</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0e1a;
+      --card: #111827;
+      --border: #1f2d45;
+      --accent: #3b82f6;
+      --green: #22c55e;
+      --yellow: #eab308;
+      --red: #ef4444;
+      --text: #f1f5f9;
+      --muted: #64748b;
+      --glow-green: 0 0 24px rgba(34,197,94,0.45);
+      --glow-yellow: 0 0 24px rgba(234,179,8,0.45);
+      --glow-red: 0 0 24px rgba(239,68,68,0.45);
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem 1rem;
+      background-image:
+        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(59,130,246,0.12) 0%, transparent 70%);
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+    header h1 {
+      font-size: clamp(1.4rem, 4vw, 2.2rem);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--text);
+    }
+    header p {
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin-top: 0.35rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 1.5rem;
+      padding: 2.5rem 3rem 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.5rem;
+      width: min(480px, 100%);
+      box-shadow: 0 8px 48px rgba(0,0,0,0.5);
+      position: relative;
+    }
+
+    /* ── GAUGE ── */
+    .gauge-wrap {
+      position: relative;
+      width: 360px;
+      max-width: 100%;
+    }
+    .gauge-wrap svg { display: block; width: 100%; }
+
+    /* arc segments */
+    .arc-low   { stroke: var(--red);    }
+    .arc-warn-lo{ stroke: var(--yellow); }
+    .arc-ok    { stroke: var(--green);  }
+    .arc-warn-hi{ stroke: var(--yellow); }
+    .arc-high  { stroke: var(--red);    }
+
+    /* needle */
+    #needle {
+      transform-origin: 180px 180px;
+      transition: transform 0.6s cubic-bezier(0.34,1.56,0.64,1);
+    }
+
+    /* centre digital display */
+    .freq-display {
+      position: absolute;
+      bottom: 22px;
+      left: 50%;
+      transform: translateX(-50%);
+      text-align: center;
+      line-height: 1.15;
+      white-space: nowrap;
+    }
+    .freq-value {
+      font-size: 2.6rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      font-variant-numeric: tabular-nums;
+      transition: color 0.4s;
+    }
+    .freq-unit {
+      font-size: 0.85rem;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    /* status badge */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 1rem;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border: 1px solid transparent;
+      transition: background 0.4s, color 0.4s, border-color 0.4s, box-shadow 0.4s;
+    }
+    .status-badge .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      animation: pulse 1.8s infinite;
+    }
+    @keyframes pulse {
+      0%,100% { opacity:1; transform:scale(1); }
+      50%      { opacity:0.5; transform:scale(1.4); }
+    }
+
+    .status-ok     { background: rgba(34,197,94,0.12); color: var(--green); border-color: rgba(34,197,94,0.3); box-shadow: var(--glow-green); }
+    .status-ok .dot    { background: var(--green); }
+    .status-warn   { background: rgba(234,179,8,0.12); color: var(--yellow); border-color: rgba(234,179,8,0.3); box-shadow: var(--glow-yellow); }
+    .status-warn .dot  { background: var(--yellow); }
+    .status-alert  { background: rgba(239,68,68,0.12); color: var(--red);   border-color: rgba(239,68,68,0.3); box-shadow: var(--glow-red); }
+    .status-alert .dot { background: var(--red); }
+
+    /* scale labels */
+    .scale-labels {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      padding: 0 0.25rem;
+      margin-top: -0.75rem;
+    }
+    .scale-labels span {
+      font-size: 0.72rem;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* meta row */
+    .meta-row {
+      display: flex;
+      gap: 2rem;
+      border-top: 1px solid var(--border);
+      padding-top: 1rem;
+      width: 100%;
+      justify-content: center;
+    }
+    .meta-item {
+      text-align: center;
+    }
+    .meta-item .label {
+      font-size: 0.7rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .meta-item .value {
+      font-size: 0.92rem;
+      font-weight: 600;
+      margin-top: 0.2rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* error / loading */
+    #error-msg {
+      color: var(--red);
+      font-size: 0.8rem;
+      text-align: center;
+      min-height: 1.1rem;
+    }
+
+    footer {
+      margin-top: 2rem;
+      color: var(--muted);
+      font-size: 0.72rem;
+      text-align: center;
+      opacity: 0.7;
+    }
+    footer a { color: inherit; text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>European Power Grid</h1>
+  <p>Real-time AC Frequency Monitor</p>
+</header>
+
+<div class="card">
+
+  <div class="gauge-wrap">
+    <svg viewBox="0 0 360 220" xmlns="http://www.w3.org/2000/svg" aria-label="Frequency gauge">
+      <defs>
+        <!-- subtle radial glow behind arc -->
+        <radialGradient id="glow" cx="50%" cy="90%" r="60%">
+          <stop offset="0%"   stop-color="#3b82f6" stop-opacity="0.08"/>
+          <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="needle-shadow" x="-20%" y="-20%" width="140%" height="140%">
+          <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#60a5fa" flood-opacity="0.6"/>
+        </filter>
+      </defs>
+
+      <!-- background glow -->
+      <ellipse cx="180" cy="190" rx="160" ry="60" fill="url(#glow)"/>
+
+      <!-- Arc parameters:
+           The gauge spans 220° (from -200° to 40° in SVG coords, i.e. 200° left of top to 40° right).
+           Centre = (180,180), R = 130.
+           Frequency range: 49.80 – 50.20 Hz  (0.40 Hz total)
+           Zones (in Hz from 49.80):
+             0.00 – 0.05  → low red    (49.80–49.85)
+             0.05 – 0.10  → low yellow (49.85–49.90)
+             0.10 – 0.30  → green      (49.90–50.10)
+             0.30 – 0.35  → hi yellow  (50.10–50.15)
+             0.35 – 0.40  → hi red     (50.15–50.20)
+
+           Arc start angle (SVG, degrees from positive-x): 200° from top CW = 200+90 = 290° from +x
+           Total sweep = 220° CW
+
+           Helper: freq_to_angle(f):
+             t = (f - 49.80) / 0.40        [0..1]
+             angle_from_top = -110 + t*220  [degrees, CW from top]
+             svg_angle = angle_from_top + 90
+      -->
+
+      <!-- Arc segments: stroke-dasharray trick on a full-circle path is complex;
+           we use individual arcs instead. R=130, cx=180, cy=180 -->
+
+      <!-- Zone boundaries in svg-degrees from +x axis:
+           49.80 → t=0.000 → svg= -110+90 = -20° (= 340°)
+           49.85 → t=0.125 → svg= -110+27.5+90 = 7.5°
+           49.90 → t=0.250 → svg= -110+55+90 = 35°
+           50.10 → t=0.750 → svg= -110+165+90 = 145°
+           50.15 → t=0.875 → svg= -110+192.5+90 = 172.5°
+           50.20 → t=1.000 → svg= -110+220+90 = 200°
+      -->
+
+      <!-- low red: 340° → 7.5° -->
+      <path class="arc-low"
+        d="M 307.67 135.44 A 130 130 0 0 1 316.95 152.41"
+        fill="none" stroke-width="18" stroke-linecap="round"/>
+
+      <!-- low yellow: 7.5° → 35° -->
+      <path class="arc-warn-lo"
+        d="M 316.95 152.41 A 130 130 0 0 1 286.42 270.06"
+        fill="none" stroke-width="18" stroke-linecap="round"/>
+
+      <!-- green: 35° → 145° -->
+      <path class="arc-ok"
+        d="M 286.42 270.06 A 130 130 0 0 1 73.58 270.06"
+        fill="none" stroke-width="18" stroke-linecap="round"/>
+
+      <!-- hi yellow: 145° → 172.5° -->
+      <path class="arc-warn-hi"
+        d="M 73.58 270.06 A 130 130 0 0 1 43.05 152.41"
+        fill="none" stroke-width="18" stroke-linecap="round"/>
+
+      <!-- hi red: 172.5° → 200° -->
+      <path class="arc-high"
+        d="M 43.05 152.41 A 130 130 0 0 1 52.33 135.44"
+        fill="none" stroke-width="18" stroke-linecap="round"/>
+
+      <!-- tick marks every 0.02 Hz (21 ticks) -->
+      <g id="ticks" stroke="#2d3d55" stroke-width="1.5"></g>
+
+      <!-- Needle group — rotated by JS -->
+      <g id="needle" filter="url(#needle-shadow)">
+        <!-- needle body -->
+        <line x1="180" y1="180" x2="180" y2="62" stroke="#60a5fa" stroke-width="3" stroke-linecap="round"/>
+        <!-- hub -->
+        <circle cx="180" cy="180" r="8" fill="#1e3a5f" stroke="#60a5fa" stroke-width="2"/>
+        <circle cx="180" cy="180" r="3" fill="#60a5fa"/>
+      </g>
+
+      <!-- Centre label: 50.00 Hz -->
+      <text x="180" y="54" text-anchor="middle" font-size="9"
+            fill="#4b6380" font-family="monospace" letter-spacing="1">50.00</text>
+    </svg>
+
+    <div class="freq-display">
+      <div class="freq-value" id="freq-value">—</div>
+      <div class="freq-unit">Hz</div>
+    </div>
+  </div>
+
+  <div class="scale-labels">
+    <span>49.80</span>
+    <span>49.85</span>
+    <span>49.90</span>
+    <span>50.00</span>
+    <span>50.10</span>
+    <span>50.15</span>
+    <span>50.20</span>
+  </div>
+
+  <div class="status-badge status-ok" id="status-badge">
+    <span class="dot"></span>
+    <span id="status-text">Loading…</span>
+  </div>
+
+  <div id="error-msg"></div>
+
+  <div class="meta-row">
+    <div class="meta-item">
+      <div class="label">Last update</div>
+      <div class="value" id="meta-time">—</div>
+    </div>
+    <div class="meta-item">
+      <div class="label">Deviation</div>
+      <div class="value" id="meta-dev">—</div>
+    </div>
+    <div class="meta-item">
+      <div class="label">Refresh</div>
+      <div class="value">5 s</div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  Data source: <a href="https://www.netzfrequenzmessung.de" target="_blank" rel="noopener">netzfrequenzmessung.de</a>
+  &nbsp;·&nbsp; ENTSO-E synchronous area
+</footer>
+
+<script>
+  // ── Constants ──────────────────────────────────────────────────────────────
+  const API_URL   = 'https://dat.netzfrequenzmessung.de:9080/frequenz.xml';
+  const PROXY_URL = 'https://corsproxy.io/?' + encodeURIComponent(API_URL);
+  const MIN_HZ    = 49.80;
+  const MAX_HZ    = 50.20;
+  const NOM_HZ    = 50.00;
+  const SWEEP_DEG = 220;   // total gauge sweep in degrees
+  const START_DEG = -110;  // degrees from top (CW positive) at MIN_HZ
+
+  // ── Build tick marks ──────────────────────────────────────────────────────
+  (function buildTicks() {
+    const g   = document.getElementById('ticks');
+    const cx  = 180, cy = 180, R = 130;
+    for (let i = 0; i <= 20; i++) {
+      const hz     = MIN_HZ + i * 0.02;
+      const svgDeg = freqToSvgDeg(hz);
+      const rad    = svgDeg * Math.PI / 180;
+      const inner  = (i % 5 === 0) ? R - 22 : R - 12;
+      const outer  = R + 2;
+      const x1 = cx + Math.cos(rad) * inner;
+      const y1 = cy + Math.sin(rad) * inner;
+      const x2 = cx + Math.cos(rad) * outer;
+      const y2 = cy + Math.sin(rad) * outer;
+      const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+      line.setAttribute('x1', x1.toFixed(2));
+      line.setAttribute('y1', y1.toFixed(2));
+      line.setAttribute('x2', x2.toFixed(2));
+      line.setAttribute('y2', y2.toFixed(2));
+      line.setAttribute('stroke-width', i % 5 === 0 ? '2.5' : '1.5');
+      line.setAttribute('stroke', i % 5 === 0 ? '#4b6380' : '#2d3d55');
+      g.appendChild(line);
+    }
+  })();
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function freqToSvgDeg(hz) {
+    // angle from +x axis, clockwise (SVG convention)
+    const t         = Math.max(0, Math.min(1, (hz - MIN_HZ) / (MAX_HZ - MIN_HZ)));
+    const fromTop   = START_DEG + t * SWEEP_DEG;   // degrees CW from top (12 o'clock)
+    return fromTop - 90;                            // SVG: 0° = 3 o'clock, so subtract 90
+  }
+
+  function freqToNeedleRotation(hz) {
+    // CSS rotate() is CW from top = SVG's "from +y"
+    const t = Math.max(0, Math.min(1, (hz - MIN_HZ) / (MAX_HZ - MIN_HZ)));
+    return START_DEG + t * SWEEP_DEG;              // degrees CW from 12 o'clock
+  }
+
+  function classifyFreq(hz) {
+    const d = Math.abs(hz - NOM_HZ);
+    if (d <= 0.10) return 'ok';
+    if (d <= 0.15) return 'warn';
+    return 'alert';
+  }
+
+  function statusLabel(hz) {
+    const d = Math.abs(hz - NOM_HZ);
+    if (d <= 0.10) return 'Normal';
+    if (d <= 0.15) return hz < NOM_HZ ? 'Low Warning' : 'High Warning';
+    return hz < NOM_HZ ? 'Under-Frequency' : 'Over-Frequency';
+  }
+
+  // ── DOM refs ───────────────────────────────────────────────────────────────
+  const needleEl   = document.getElementById('needle');
+  const freqValEl  = document.getElementById('freq-value');
+  const badgeEl    = document.getElementById('status-badge');
+  const statusEl   = document.getElementById('status-text');
+  const errorEl    = document.getElementById('error-msg');
+  const timeEl     = document.getElementById('meta-time');
+  const devEl      = document.getElementById('meta-dev');
+
+  // ── Update UI ──────────────────────────────────────────────────────────────
+  function updateUI(hz) {
+    const rot   = freqToNeedleRotation(hz);
+    needleEl.style.transform = `rotate(${rot}deg)`;
+
+    freqValEl.textContent = hz.toFixed(3);
+
+    const cls   = classifyFreq(hz);
+    const label = statusLabel(hz);
+    badgeEl.className = `status-badge status-${cls}`;
+    statusEl.textContent = label;
+
+    // colour the numeric value
+    const colours = { ok: 'var(--green)', warn: 'var(--yellow)', alert: 'var(--red)' };
+    freqValEl.style.color = colours[cls];
+
+    // deviation from nominal
+    const dev = (hz - NOM_HZ);
+    devEl.textContent = (dev >= 0 ? '+' : '') + dev.toFixed(3) + ' Hz';
+    devEl.style.color  = colours[cls];
+
+    // timestamp
+    const now = new Date();
+    timeEl.textContent = now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+
+    errorEl.textContent = '';
+  }
+
+  // ── Fetch ──────────────────────────────────────────────────────────────────
+  async function fetchFrequency() {
+    try {
+      const resp = await fetch(PROXY_URL, { cache: 'no-store' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const text = await resp.text();
+      const match = text.match(/<f>([\d.]+)<\/f>/);
+      if (!match) throw new Error('Unexpected XML format');
+      const hz = parseFloat(match[1]);
+      if (isNaN(hz)) throw new Error('Invalid frequency value');
+      updateUI(hz);
+    } catch (err) {
+      // try direct (works if CORS is allowed, or same-origin)
+      try {
+        const resp2 = await fetch(API_URL, { cache: 'no-store' });
+        if (!resp2.ok) throw new Error(`HTTP ${resp2.status}`);
+        const text2 = await resp2.text();
+        const match2 = text2.match(/<f>([\d.]+)<\/f>/);
+        if (!match2) throw new Error('Unexpected XML format');
+        const hz = parseFloat(match2[1]);
+        if (isNaN(hz)) throw new Error('Invalid frequency value');
+        updateUI(hz);
+      } catch (err2) {
+        errorEl.textContent = `Could not fetch data: ${err2.message}`;
+      }
+    }
+  }
+
+  fetchFrequency();
+  setInterval(fetchFrequency, 5000);
+</script>
+</body>
+</html>
