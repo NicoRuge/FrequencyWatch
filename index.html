@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FrequencyWatch — EU Power Grid</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0a0e1a;
+      --surface:   #111827;
+      --border:    #1f2d40;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --low:       #ef4444;
+      --warn:      #f59e0b;
+      --ok:        #22c55e;
+      --high:      #ef4444;
+      --accent:    #38bdf8;
+      --glow:      rgba(56,189,248,.18);
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      font-family: 'Inter', system-ui, sans-serif;
+      color: var(--text);
+      gap: 0;
+    }
+
+    /* ── Header ── */
+    header {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 28px 0 0;
+    }
+    .logo-icon {
+      width: 32px; height: 32px;
+      fill: none; stroke: var(--accent);
+      stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+    }
+    header h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: .04em;
+      color: var(--text);
+    }
+    header h1 span { color: var(--accent); }
+
+    /* ── Card ── */
+    .card {
+      margin-top: 28px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 36px 44px 32px;
+      width: min(520px, 94vw);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      box-shadow: 0 0 60px rgba(0,0,0,.5), 0 0 0 1px var(--border);
+    }
+
+    /* ── Gauge SVG wrapper ── */
+    .gauge-wrap {
+      position: relative;
+      width: 100%;
+      max-width: 400px;
+    }
+    .gauge-wrap svg { width: 100%; height: auto; overflow: visible; }
+
+    /* ── Readout ── */
+    .readout {
+      text-align: center;
+      margin-top: -8px;
+    }
+    .readout .freq-value {
+      font-size: 3rem;
+      font-weight: 800;
+      letter-spacing: .02em;
+      transition: color .4s;
+    }
+    .readout .freq-unit {
+      font-size: 1.1rem;
+      font-weight: 500;
+      color: var(--muted);
+      margin-left: 4px;
+    }
+    .readout .freq-label {
+      font-size: .78rem;
+      color: var(--muted);
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      margin-top: 2px;
+    }
+
+    /* ── Status badge ── */
+    .status-badge {
+      margin-top: 18px;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 18px;
+      border-radius: 99px;
+      font-size: .82rem;
+      font-weight: 600;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      border: 1px solid transparent;
+      transition: background .4s, border-color .4s, color .4s;
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%,100% { opacity: 1; }
+      50%      { opacity: .35; }
+    }
+
+    /* ── Divider ── */
+    .divider {
+      width: 100%;
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 22px 0 18px;
+    }
+
+    /* ── Meta row ── */
+    .meta-row {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+    .meta-item { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .meta-item .label { font-size: .7rem; color: var(--muted); letter-spacing: .07em; text-transform: uppercase; }
+    .meta-item .value { font-size: .9rem; font-weight: 600; color: var(--text); }
+
+    /* ── Footer ── */
+    footer {
+      margin-top: 22px;
+      margin-bottom: 28px;
+      font-size: .72rem;
+      color: var(--muted);
+      text-align: center;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg class="logo-icon" viewBox="0 0 24 24">
+    <polyline points="1 12 5 12 7 4 9 20 11 10 13 15 15 9 17 12 23 12"/>
+  </svg>
+  <h1>Frequency<span>Watch</span></h1>
+</header>
+
+<div class="card">
+
+  <!-- Gauge -->
+  <div class="gauge-wrap">
+    <svg id="gauge-svg" viewBox="0 0 400 300">
+      <defs>
+        <filter id="glow-filter" x="-30%" y="-30%" width="160%" height="160%">
+          <feGaussianBlur stdDeviation="6" result="blur"/>
+          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+
+      <!-- Background arc (track) -->
+      <path id="track" fill="none" stroke="#1f2d40" stroke-width="22" stroke-linecap="round"/>
+
+      <!-- Colored zone arcs -->
+      <path id="zone-low"   fill="none" stroke="#ef4444" stroke-width="22" stroke-linecap="butt" opacity=".55"/>
+      <path id="zone-warn-l"fill="none" stroke="#f59e0b" stroke-width="22" stroke-linecap="butt" opacity=".60"/>
+      <path id="zone-ok"    fill="none" stroke="#22c55e" stroke-width="22" stroke-linecap="butt" opacity=".45"/>
+      <path id="zone-warn-h"fill="none" stroke="#f59e0b" stroke-width="22" stroke-linecap="butt" opacity=".60"/>
+      <path id="zone-high"  fill="none" stroke="#ef4444" stroke-width="22" stroke-linecap="butt" opacity=".55"/>
+
+      <!-- Tick marks -->
+      <g id="ticks"></g>
+
+      <!-- Needle pointer -->
+      <g id="needle-group">
+        <line id="needle-line" stroke-width="3" stroke-linecap="round"/>
+        <circle id="needle-hub" r="7" fill="#e2e8f0"/>
+      </g>
+
+      <!-- Scale labels -->
+      <g id="labels" font-family="Inter,system-ui,sans-serif" font-size="13" fill="#64748b" text-anchor="middle"></g>
+
+      <!-- Centre label placeholder -->
+      <text x="200" y="292" text-anchor="middle" font-family="Inter,system-ui,sans-serif"
+            font-size="11" fill="#64748b" letter-spacing="1">Hz</text>
+    </svg>
+  </div>
+
+  <!-- Readout -->
+  <div class="readout">
+    <span class="freq-value" id="freq-display">—</span><span class="freq-unit">Hz</span>
+    <div class="freq-label">Grid Frequency</div>
+  </div>
+
+  <!-- Status badge -->
+  <div class="status-badge" id="status-badge">
+    <span class="status-dot" id="status-dot"></span>
+    <span id="status-text">Loading…</span>
+  </div>
+
+  <hr class="divider"/>
+
+  <!-- Meta row -->
+  <div class="meta-row">
+    <div class="meta-item">
+      <span class="label">Last Update</span>
+      <span class="value" id="meta-time">—</span>
+    </div>
+    <div class="meta-item">
+      <span class="label">Deviation</span>
+      <span class="value" id="meta-dev">—</span>
+    </div>
+    <div class="meta-item">
+      <span class="label">Refresh</span>
+      <span class="value">5 s</span>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  Data: <a href="https://www.netzfrequenzmessung.de" target="_blank">netzfrequenzmessung.de</a> &nbsp;·&nbsp;
+  European Transmission Grid &nbsp;·&nbsp; Nominal 50 Hz
+</footer>
+
+<script>
+/* ─── Gauge geometry ─── */
+const CX = 200, CY = 200, R = 155;
+const START_DEG = 240, END_DEG = 120;   // 240° → 120°  (240° sweep, symmetric around top)
+const FREQ_MIN  = 49.80, FREQ_MAX = 50.20, FREQ_NOM = 50.00;
+
+// Frequency zones (Hz)
+const ZONES = [
+  { lo: 49.80, hi: 49.85, stroke: '#ef4444' }, // critical low
+  { lo: 49.85, hi: 49.90, stroke: '#f59e0b' }, // warn low
+  { lo: 49.90, hi: 50.10, stroke: '#22c55e' }, // nominal
+  { lo: 50.10, hi: 50.15, stroke: '#f59e0b' }, // warn high
+  { lo: 50.15, hi: 50.20, stroke: '#ef4444' }, // critical high
+];
+
+function freqToDeg(f) {
+  const t = (f - FREQ_MIN) / (FREQ_MAX - FREQ_MIN);
+  return START_DEG + t * (END_DEG - START_DEG + 360 - 360 + 240);
+  // total sweep = 240°
+}
+const SWEEP = 240;
+function freqToDeg2(f) {
+  const t = Math.max(0, Math.min(1, (f - FREQ_MIN) / (FREQ_MAX - FREQ_MIN)));
+  return START_DEG + t * SWEEP;
+}
+
+function polarToXY(deg, r) {
+  const rad = (deg - 90) * Math.PI / 180;
+  return { x: CX + r * Math.cos(rad), y: CY + r * Math.sin(rad) };
+}
+
+function arcPath(startDeg, endDeg, r) {
+  const s = polarToXY(startDeg, r);
+  const e = polarToXY(endDeg, r);
+  const large = (endDeg - startDeg) > 180 ? 1 : 0;
+  return `M ${s.x} ${s.y} A ${r} ${r} 0 ${large} 1 ${e.x} ${e.y}`;
+}
+
+/* ─── Init SVG ─── */
+function initGauge() {
+  // Track
+  document.getElementById('track').setAttribute('d', arcPath(START_DEG, START_DEG + SWEEP, R));
+
+  // Zone arcs
+  const zoneIds = ['zone-low','zone-warn-l','zone-ok','zone-warn-h','zone-high'];
+  ZONES.forEach((z, i) => {
+    const el = document.getElementById(zoneIds[i]);
+    el.setAttribute('d', arcPath(freqToDeg2(z.lo), freqToDeg2(z.hi), R));
+    el.setAttribute('stroke', z.stroke);
+  });
+
+  // Ticks + labels
+  const ticksG  = document.getElementById('ticks');
+  const labelsG = document.getElementById('labels');
+  const tickFreqs = [49.80, 49.85, 49.90, 49.95, 50.00, 50.05, 50.10, 50.15, 50.20];
+  tickFreqs.forEach(f => {
+    const deg = freqToDeg2(f);
+    const inner = polarToXY(deg, R - 18);
+    const outer = polarToXY(deg, R + 4);
+    const line = document.createElementNS('http://www.w3.org/2000/svg','line');
+    line.setAttribute('x1', inner.x); line.setAttribute('y1', inner.y);
+    line.setAttribute('x2', outer.x); line.setAttribute('y2', outer.y);
+    line.setAttribute('stroke', f === 50.00 ? '#94a3b8' : '#334155');
+    line.setAttribute('stroke-width', f === 50.00 ? '2.5' : '1.5');
+    ticksG.appendChild(line);
+
+    // Label
+    const lp = polarToXY(deg, R + 22);
+    const txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+    txt.setAttribute('x', lp.x); txt.setAttribute('y', lp.y + 4);
+    txt.setAttribute('font-size', f === 50.00 ? '13' : '11');
+    txt.setAttribute('fill', f === 50.00 ? '#94a3b8' : '#475569');
+    txt.textContent = f.toFixed(2);
+    labelsG.appendChild(txt);
+  });
+
+  // Needle hub centre
+  document.getElementById('needle-hub').setAttribute('cx', CX);
+  document.getElementById('needle-hub').setAttribute('cy', CY);
+}
+
+/* ─── Update display ─── */
+function getStatusInfo(f) {
+  if (f < 49.85 || f > 50.15) return { label: 'Critical',  color: '#ef4444', bg: 'rgba(239,68,68,.12)'  };
+  if (f < 49.90 || f > 50.10) return { label: 'Warning',   color: '#f59e0b', bg: 'rgba(245,158,11,.12)' };
+  return                              { label: 'Normal',    color: '#22c55e', bg: 'rgba(34,197,94,.12)'  };
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+let currentAngle = freqToDeg2(50.00);
+let targetAngle  = currentAngle;
+let animHandle   = null;
+
+function animateTo(targetF) {
+  targetAngle = freqToDeg2(targetF);
+  if (animHandle) return;
+  function step() {
+    currentAngle = lerp(currentAngle, targetAngle, 0.12);
+    renderNeedle(currentAngle, targetF);
+    if (Math.abs(currentAngle - targetAngle) > 0.05) {
+      animHandle = requestAnimationFrame(step);
+    } else {
+      currentAngle = targetAngle;
+      renderNeedle(currentAngle, targetF);
+      animHandle = null;
+    }
+  }
+  animHandle = requestAnimationFrame(step);
+}
+
+function renderNeedle(deg, freq) {
+  const status = getStatusInfo(freq);
+
+  // Needle pointer line
+  const tip  = polarToXY(deg, R - 40);
+  const base = polarToXY(deg + 180, 18);
+  const needle = document.getElementById('needle-line');
+  needle.setAttribute('x1', base.x); needle.setAttribute('y1', base.y);
+  needle.setAttribute('x2', tip.x);  needle.setAttribute('y2', tip.y);
+  needle.setAttribute('stroke', status.color);
+  needle.setAttribute('filter', 'url(#glow-filter)');
+}
+
+function updateDisplay(freq, timestamp) {
+  const status = getStatusInfo(freq);
+  const dev    = (freq - FREQ_NOM).toFixed(3);
+
+  // Frequency readout
+  const disp = document.getElementById('freq-display');
+  disp.textContent = freq.toFixed(3);
+  disp.style.color = status.color;
+
+  // Status badge
+  const badge = document.getElementById('status-badge');
+  badge.style.background  = status.bg;
+  badge.style.borderColor = status.color + '55';
+  badge.style.color       = status.color;
+  document.getElementById('status-dot').style.background = status.color;
+  document.getElementById('status-text').textContent     = status.label;
+
+  // Meta
+  if (timestamp) {
+    const d = new Date(timestamp);
+    document.getElementById('meta-time').textContent =
+      d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+  const devEl = document.getElementById('meta-dev');
+  devEl.textContent = (freq >= FREQ_NOM ? '+' : '') + dev + ' Hz';
+  devEl.style.color  = status.color;
+
+  animateTo(freq);
+}
+
+/* ─── Fetch with cascading fallbacks ─── */
+async function tryFetch(url, isJson) {
+  const res  = await fetch(url, { cache: 'no-store' });
+  const text = isJson ? (await res.json()).contents : await res.text();
+  const freq = parseFloat(text.match(/<f>([\d.]+)<\/f>/)?.[1]);
+  const ts   = text.match(/<z>([^<]+)<\/z>/)?.[1];
+  if (isNaN(freq)) throw new Error('No frequency in response');
+  return { freq, ts };
+}
+
+const DIRECT_URL  = 'https://dat.netzfrequenzmessung.de:9080/frequenz.xml';
+const PROXY_LOCAL = '/api/frequency';
+const PROXY_EXT   = 'https://api.allorigins.win/get?url=' + encodeURIComponent(DIRECT_URL);
+
+async function fetchFrequency() {
+  const sources = [
+    { url: PROXY_LOCAL, json: false },  // local dev server proxy
+    { url: DIRECT_URL,  json: false },  // direct (works if CORS added later)
+    { url: PROXY_EXT,   json: true  },  // allorigins fallback
+  ];
+  for (const src of sources) {
+    try {
+      const { freq, ts } = await tryFetch(src.url, src.json);
+      updateDisplay(freq, ts);
+      return;
+    } catch (_) { /* try next */ }
+  }
+  console.warn('All sources failed');
+}
+
+/* ─── Boot ─── */
+initGauge();
+renderNeedle(freqToDeg2(50.00), 50.00);
+fetchFrequency();
+setInterval(fetchFrequency, 5000);
+</script>
+</body>
+</html>
